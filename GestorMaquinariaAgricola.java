@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
-import java.util.Stack;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -21,25 +20,23 @@ import javax.swing.JSpinner;
 import javax.swing.JTabbedPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.SpinnerNumberModel;
-import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.table.DefaultTableModel;
 
-// Representa un equipo agrícola con su estado operativo y de mantenimiento.
 class EquipoAgricola {
-    String identificador;
-    String tipo;
+    final String identificador;
+    final String tipo;
     int horasRestantes;
     int horasTotalesTrabajadas;
-    int umbralMantenimiento;
+    final int umbralMantenimiento;
 
-    public EquipoAgricola(String identificador, String tipo, int horasRestantes, int umbralMantenimiento) {
+    EquipoAgricola(String identificador, String tipo, int horasRestantes, int umbralMantenimiento) {
         this.identificador = identificador;
         this.tipo = tipo;
         this.horasRestantes = horasRestantes;
-        this.horasTotalesTrabajadas = 0;
         this.umbralMantenimiento = umbralMantenimiento;
     }
 }
@@ -47,94 +44,71 @@ class EquipoAgricola {
 public class GestorMaquinariaAgricola {
     private final Queue<EquipoAgricola> colaPrioridadAlta = new LinkedList<>();
     private final Queue<EquipoAgricola> colaPrioridadBaja = new LinkedList<>();
-    private final Stack<String> pilaCambiosContexto = new Stack<>();
-    private final int[] umbralesGlobales = {100, 250, 500};
-    private final double[][] estadisticasRendimiento = new double[5][3];
-    private final List<String> inventarioMaquinariaActiva = new LinkedList<>();
-    private final LinkedList<String> listaPrioridadesTrabajo = new LinkedList<>();
-    private final List<String> turnosConfigurados = new ArrayList<>();
-    private final List<EquipoAgricola> maquinaria = new ArrayList<>();
+    private final List<EquipoAgricola> equiposAgricolas = new ArrayList<>();
 
-    private final DefaultTableModel maquinariaModel = new DefaultTableModel(
-            new Object[]{"ID", "Tipo", "Prioridad", "Horas restantes", "Horas trabajadas", "Mantenimiento"},
-            0) {
-        @Override
-        public boolean isCellEditable(int row, int column) {
-            return false;
-        }
-    };
-    private final DefaultTableModel estadisticasModel = new DefaultTableModel(
-            new Object[]{"ID", "Combustible (L)", "Horas trabajadas", "Tiempo muerto (h)"},
-            0) {
-        @Override
-        public boolean isCellEditable(int row, int column) {
-            return false;
-        }
-    };
+    private final DefaultTableModel modeloMaquinaria = crearModeloNoEditable(
+            "ID", "Tipo", "Prioridad", "Horas restantes", "Horas trabajadas", "Mantenimiento");
+    private final DefaultTableModel modeloEstadisticas = crearModeloNoEditable(
+            "ID", "Combustible (L)", "Horas trabajadas", "Tiempo muerto (h)");
     private final JTextArea historialArea = new JTextArea();
-    private final JLabel estadoLabel = new JLabel("Sistema listo");
-    private JFrame frame;
+    private final JLabel estadoLabel = new JLabel("Todo listo para organizar el trabajo.");
+    private JFrame ventanaPrincipal;
 
     public void inicializarSistema() {
-        // Equipos de ejemplo con carga inicial típica del campo.
         EquipoAgricola tractor = new EquipoAgricola("TR-01", "Tractor", 30, 100);
         EquipoAgricola cosechadora = new EquipoAgricola("COS-02", "Cosechadora", 45, 250);
 
-        maquinaria.add(tractor);
-        maquinaria.add(cosechadora);
+        equiposAgricolas.add(tractor);
+        equiposAgricolas.add(cosechadora);
         colaPrioridadAlta.add(tractor);
         colaPrioridadBaja.add(cosechadora);
-        inventarioMaquinariaActiva.add("TR-01 (Activo)");
-        inventarioMaquinariaActiva.add("COS-02 (Activo)");
-        listaPrioridadesTrabajo.add("Prioridad Alta: Cosecha urgente");
-        listaPrioridadesTrabajo.add("Prioridad Baja: Labranza secundaria");
-        turnosConfigurados.add("Turno Mañana (06:00 - 14:00)");
-        turnosConfigurados.add("Turno Tarde (14:00 - 22:00)");
-        turnosConfigurados.add("Turno Noche (22:00 - 06:00)");
     }
 
-    private void ejecutarPlanificacionPorTurnos(int duracionTurno) {
+    private void planificarTrabajoPorTurnos(int horasPorTurno) {
         if (colaPrioridadAlta.isEmpty() && colaPrioridadBaja.isEmpty()) {
-            registrarEnHistorial("No hay tareas pendientes para planificar.");
+            agregarAlHistorial("No hay tareas pendientes. Agrega un equipo para empezar.");
+            estadoLabel.setText("No hay tareas pendientes.");
             return;
         }
 
-        registrarEnHistorial("--- Planificación por turnos (duración: " + duracionTurno + " h) ---");
+        agregarAlHistorial("--- Empezamos: cada equipo trabajará hasta " + horasPorTurno + " h por turno. ---");
+        // Primero atendemos los equipos urgentes; si no terminan, pasan a prioridad baja.
         while (!colaPrioridadAlta.isEmpty() || !colaPrioridadBaja.isEmpty()) {
             while (!colaPrioridadAlta.isEmpty()) {
-                procesarEquipo(colaPrioridadAlta.poll(), duracionTurno, false);
+                procesarTurnoDeEquipo(colaPrioridadAlta.poll(), horasPorTurno);
             }
             while (!colaPrioridadBaja.isEmpty()) {
-                procesarEquipo(colaPrioridadBaja.poll(), duracionTurno, true);
+                procesarTurnoDeEquipo(colaPrioridadBaja.poll(), horasPorTurno);
             }
         }
-        registrarEnHistorial("Planificación completada.");
+        agregarAlHistorial("Listo: ya atendimos todas las tareas pendientes.");
         actualizarTablas();
-        estadoLabel.setText("Planificación completada");
+        estadoLabel.setText("Trabajo planificado");
     }
 
-    private void procesarEquipo(EquipoAgricola equipoActual, int quantum, boolean prioridadBaja) {
-        int tiempoEjecutado = Math.min(quantum, equipoActual.horasRestantes);
-        String accion = prioridadBaja ? "Retomando " : "Ejecutando ";
-        String evento = "Cambio de contexto: " + accion + equipoActual.identificador + " por "
-                + tiempoEjecutado + " h.";
-        pilaCambiosContexto.push(evento);
-        registrarEnHistorial(evento);
+    private void procesarTurnoDeEquipo(EquipoAgricola equipo, int horasPorTurno) {
+        int horasTrabajadas = Math.min(horasPorTurno, equipo.horasRestantes);
+        String evento = equipo.identificador + " trabajará durante " + horasTrabajadas + " h.";
+        agregarAlHistorial(evento);
 
-        equipoActual.horasRestantes -= tiempoEjecutado;
-        equipoActual.horasTotalesTrabajadas += tiempoEjecutado;
-        if (equipoActual.horasRestantes > 0) {
-            colaPrioridadBaja.add(equipoActual);
-            registrarEnHistorial("  " + equipoActual.identificador + " consumió su quantum; pasa a prioridad baja.");
+        equipo.horasRestantes -= horasTrabajadas;
+        equipo.horasTotalesTrabajadas += horasTrabajadas;
+        if (equipo.horasRestantes > 0) {
+            colaPrioridadBaja.add(equipo);
+            agregarAlHistorial("  A " + equipo.identificador
+                    + " todavía le queda trabajo; continuará con prioridad baja.");
         } else {
-            registrarEnHistorial("  La tarea de " + equipoActual.identificador + " finalizó correctamente.");
+            agregarAlHistorial("  ¡Buen trabajo! " + equipo.identificador + " terminó su tarea.");
         }
     }
 
-    private void registrarEstadistica(int indiceEquipo, double combustible, double horas, double tiempoMuerto) {
-        estadisticasRendimiento[indiceEquipo][0] = combustible;
-        estadisticasRendimiento[indiceEquipo][1] = horas;
-        estadisticasRendimiento[indiceEquipo][2] = tiempoMuerto;
+    private DefaultTableModel crearModeloNoEditable(String... columnas) {
+        return new DefaultTableModel(columnas, 0) {
+            @Override
+            public boolean isCellEditable(int fila, int columna) {
+                return false;
+            }
+        };
     }
 
     private void mostrarVentanaPrincipal() {
@@ -144,13 +118,13 @@ public class GestorMaquinariaAgricola {
             System.err.println("No se pudo aplicar el estilo del sistema: " + exception.getMessage());
         }
 
-        frame = new JFrame("Gestor de Maquinaria Agrícola");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setMinimumSize(new Dimension(850, 560));
-        frame.setSize(1050, 680);
-        frame.setLocationRelativeTo(null);
-        frame.setLayout(new BorderLayout(0, 12));
-        frame.getContentPane().setBackground(new Color(245, 248, 243));
+        ventanaPrincipal = new JFrame("Gestor de Maquinaria Agrícola");
+        ventanaPrincipal.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        ventanaPrincipal.setMinimumSize(new Dimension(850, 560));
+        ventanaPrincipal.setSize(1050, 680);
+        ventanaPrincipal.setLocationRelativeTo(null);
+        ventanaPrincipal.setLayout(new BorderLayout(0, 12));
+        ventanaPrincipal.getContentPane().setBackground(new Color(245, 248, 243));
 
         JPanel encabezado = new JPanel(new BorderLayout());
         encabezado.setBackground(new Color(38, 91, 57));
@@ -158,7 +132,7 @@ public class GestorMaquinariaAgricola {
         JLabel titulo = new JLabel("Gestor de Maquinaria Agrícola");
         titulo.setForeground(Color.WHITE);
         titulo.setFont(new Font("SansSerif", Font.BOLD, 23));
-        JLabel subtitulo = new JLabel("Control de equipos y planificación de tareas");
+        JLabel subtitulo = new JLabel("Organiza tus equipos y planifica el trabajo del campo.");
         subtitulo.setForeground(new Color(220, 235, 221));
         subtitulo.setFont(new Font("SansSerif", Font.PLAIN, 13));
         JPanel textosEncabezado = new JPanel(new GridLayout(2, 1, 0, 4));
@@ -166,81 +140,72 @@ public class GestorMaquinariaAgricola {
         textosEncabezado.add(titulo);
         textosEncabezado.add(subtitulo);
         encabezado.add(textosEncabezado, BorderLayout.CENTER);
-        frame.add(encabezado, BorderLayout.NORTH);
+        ventanaPrincipal.add(encabezado, BorderLayout.NORTH);
 
-        JTabbedPane pestañas = new JTabbedPane();
-        pestañas.setBorder(BorderFactory.createEmptyBorder(0, 18, 0, 18));
-        pestañas.addTab("Maquinaria", crearPanelEquipos());
-        pestañas.addTab("Estadísticas", crearPanelEstadisticasUso());
-        pestañas.addTab("Historial", crearPanelEventos());
-        frame.add(pestañas, BorderLayout.CENTER);
+        JTabbedPane pestanas = new JTabbedPane();
+        pestanas.setBorder(BorderFactory.createEmptyBorder(0, 18, 0, 18));
+        pestanas.addTab("Maquinaria", crearPanelEquipos());
+        pestanas.addTab("Estadísticas", crearPanelEstadisticasUso());
+        pestanas.addTab("Historial", crearPanelEventos());
+        ventanaPrincipal.add(pestanas, BorderLayout.CENTER);
 
         JPanel piePagina = new JPanel(new BorderLayout());
         piePagina.setBackground(new Color(238, 243, 236));
         piePagina.setBorder(BorderFactory.createEmptyBorder(9, 24, 9, 24));
         estadoLabel.setForeground(new Color(70, 90, 73));
         piePagina.add(estadoLabel, BorderLayout.WEST);
-        JLabel turnosLabel = new JLabel("Turnos configurados: 3");
-        turnosLabel.setForeground(new Color(70, 90, 73));
-        piePagina.add(turnosLabel, BorderLayout.EAST);
-        frame.add(piePagina, BorderLayout.SOUTH);
+        JLabel turnosConfiguradosLabel = new JLabel("Turnos disponibles: 3");
+        turnosConfiguradosLabel.setForeground(new Color(70, 90, 73));
+        piePagina.add(turnosConfiguradosLabel, BorderLayout.EAST);
+        ventanaPrincipal.add(piePagina, BorderLayout.SOUTH);
 
         actualizarTablas();
-        frame.setVisible(true);
+        ventanaPrincipal.setVisible(true);
     }
 
     private JPanel crearPanelEquipos() {
-        JPanel panel = new JPanel(new BorderLayout(0, 12));
-        panel.setBackground(new Color(245, 248, 243));
-        panel.setBorder(BorderFactory.createEmptyBorder(18, 6, 12, 6));
+        JPanel panel = crearPanelContenido();
 
-        JPanel acciones = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-        acciones.setOpaque(false);
-        JButton agregarButton = crearBoton("Agregar maquinaria", new Color(55, 117, 70));
-        agregarButton.addActionListener(event -> mostrarDialogoAgregarEquipo());
-        acciones.add(agregarButton);
+        JPanel panelAcciones = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+        panelAcciones.setOpaque(false);
+        JButton botonAgregarEquipo = crearBoton("Agregar equipo", new Color(55, 117, 70));
+        botonAgregarEquipo.addActionListener(event -> mostrarDialogoAgregarEquipo());
+        panelAcciones.add(botonAgregarEquipo);
 
-        acciones.add(new JLabel("Duración del turno (horas):"));
-        JSpinner quantumSpinner = new JSpinner(new SpinnerNumberModel(15, 1, 500, 1));
-        quantumSpinner.setPreferredSize(new Dimension(78, 32));
-        acciones.add(quantumSpinner);
-        JButton planificarButton = crearBoton("Ejecutar planificación", new Color(44, 95, 138));
-        planificarButton.addActionListener(event ->
-                ejecutarPlanificacionPorTurnos((Integer) quantumSpinner.getValue()));
-        acciones.add(planificarButton);
-        panel.add(acciones, BorderLayout.NORTH);
+        panelAcciones.add(new JLabel("Horas de trabajo por turno:"));
+        JSpinner controlHorasPorTurno = new JSpinner(new SpinnerNumberModel(15, 1, 500, 1));
+        controlHorasPorTurno.setPreferredSize(new Dimension(78, 32));
+        panelAcciones.add(controlHorasPorTurno);
+        JButton botonPlanificar = crearBoton("Planificar trabajo", new Color(44, 95, 138));
+        botonPlanificar.addActionListener(event ->
+                planificarTrabajoPorTurnos((Integer) controlHorasPorTurno.getValue()));
+        panelAcciones.add(botonPlanificar);
+        panel.add(panelAcciones, BorderLayout.NORTH);
 
-        JTable tabla = crearTabla(maquinariaModel);
+        JTable tabla = crearTabla(modeloMaquinaria);
         panel.add(new JScrollPane(tabla), BorderLayout.CENTER);
-        JLabel nota = new JLabel("El equipo baja de prioridad cuando requiere más de un turno de trabajo.");
+        JLabel nota = new JLabel("Si no termina en un turno, el equipo continuará después con prioridad baja.");
         nota.setForeground(new Color(92, 105, 92));
         panel.add(nota, BorderLayout.SOUTH);
         return panel;
     }
 
     private JPanel crearPanelEstadisticasUso() {
-        JPanel panel = new JPanel(new BorderLayout(0, 12));
-        panel.setBackground(new Color(245, 248, 243));
-        panel.setBorder(BorderFactory.createEmptyBorder(18, 6, 12, 6));
-        JLabel descripcion = new JLabel("Resumen de uso registrado por maquinaria");
-        descripcion.setFont(new Font("SansSerif", Font.BOLD, 15));
-        panel.add(descripcion, BorderLayout.NORTH);
-        panel.add(new JScrollPane(crearTabla(estadisticasModel)), BorderLayout.CENTER);
+        JPanel panel = crearPanelContenido();
+        panel.add(crearTituloPanel("Así va el trabajo de cada equipo"), BorderLayout.NORTH);
+        panel.add(new JScrollPane(crearTabla(modeloEstadisticas)), BorderLayout.CENTER);
         return panel;
     }
 
     private JPanel crearPanelEventos() {
-        JPanel panel = new JPanel(new BorderLayout(0, 12));
-        panel.setBackground(new Color(245, 248, 243));
-        panel.setBorder(BorderFactory.createEmptyBorder(18, 6, 12, 6));
+        JPanel panel = crearPanelContenido();
         JPanel cabecera = new JPanel(new BorderLayout());
         cabecera.setOpaque(false);
-        JLabel descripcion = new JLabel("Eventos de planificación y cambios de contexto");
-        descripcion.setFont(new Font("SansSerif", Font.BOLD, 15));
-        cabecera.add(descripcion, BorderLayout.WEST);
-        JButton limpiarButton = crearBoton("Limpiar historial", new Color(116, 125, 115));
-        limpiarButton.addActionListener(event -> historialArea.setText(""));
-        cabecera.add(limpiarButton, BorderLayout.EAST);
+        cabecera.add(crearTituloPanel("Aquí puedes revisar el trabajo que se ha realizado."),
+                BorderLayout.WEST);
+        JButton botonBorrarHistorial = crearBoton("Borrar historial", new Color(116, 125, 115));
+        botonBorrarHistorial.addActionListener(event -> historialArea.setText(""));
+        cabecera.add(botonBorrarHistorial, BorderLayout.EAST);
         panel.add(cabecera, BorderLayout.NORTH);
 
         historialArea.setEditable(false);
@@ -249,6 +214,19 @@ public class GestorMaquinariaAgricola {
         historialArea.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
         panel.add(new JScrollPane(historialArea), BorderLayout.CENTER);
         return panel;
+    }
+
+    private JPanel crearPanelContenido() {
+        JPanel panel = new JPanel(new BorderLayout(0, 12));
+        panel.setBackground(new Color(245, 248, 243));
+        panel.setBorder(BorderFactory.createEmptyBorder(18, 6, 12, 6));
+        return panel;
+    }
+
+    private JLabel crearTituloPanel(String texto) {
+        JLabel titulo = new JLabel(texto);
+        titulo.setFont(new Font("SansSerif", Font.BOLD, 15));
+        return titulo;
     }
 
     private JButton crearBoton(String texto, Color color) {
@@ -270,79 +248,76 @@ public class GestorMaquinariaAgricola {
     }
 
     private void mostrarDialogoAgregarEquipo() {
-        JTextArea idInput = new JTextArea(1, 12);
-        JComboBox<String> tipoInput = new JComboBox<>(new String[]{"Tractor", "Cosechadora", "Aspersor"});
-        JSpinner horasInput = new JSpinner(new SpinnerNumberModel(20, 1, 10000, 1));
-        JComboBox<String> prioridadInput = new JComboBox<>(new String[]{"Alta", "Baja"});
-        JComboBox<Integer> umbralInput = new JComboBox<>(new Integer[]{umbralesGlobales[0], umbralesGlobales[1], umbralesGlobales[2]});
+        JTextField campoIdentificador = new JTextField(12);
+        JComboBox<String> selectorTipoEquipo = new JComboBox<>(new String[]{"Tractor", "Cosechadora", "Aspersor"});
+        JSpinner controlHorasTrabajo = new JSpinner(new SpinnerNumberModel(20, 1, 10000, 1));
+        JComboBox<String> selectorPrioridadInicial = new JComboBox<>(new String[]{"Alta", "Baja"});
+        JComboBox<Integer> selectorUmbralMantenimiento = new JComboBox<>(
+                new Integer[]{100, 250, 500});
         JPanel formulario = new JPanel(new GridLayout(5, 2, 8, 8));
-        formulario.add(new JLabel("Identificador:"));
-        formulario.add(idInput);
+        formulario.add(new JLabel("Código del equipo:"));
+        formulario.add(campoIdentificador);
         formulario.add(new JLabel("Tipo:"));
-        formulario.add(tipoInput);
-        formulario.add(new JLabel("Horas de tarea:"));
-        formulario.add(horasInput);
-        formulario.add(new JLabel("Prioridad inicial:"));
-        formulario.add(prioridadInput);
-        formulario.add(new JLabel("Umbral de mantenimiento:"));
-        formulario.add(umbralInput);
+        formulario.add(selectorTipoEquipo);
+        formulario.add(new JLabel("Horas de trabajo pendientes:"));
+        formulario.add(controlHorasTrabajo);
+        formulario.add(new JLabel("Prioridad para comenzar:"));
+        formulario.add(selectorPrioridadInicial);
+        formulario.add(new JLabel("Recordatorio de mantenimiento cada (h):"));
+        formulario.add(selectorUmbralMantenimiento);
 
-        int resultado = JOptionPane.showConfirmDialog(frame, formulario,
-                "Agregar maquinaria", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
+        int resultado = JOptionPane.showConfirmDialog(ventanaPrincipal, formulario,
+                "Agregar un equipo", JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
         if (resultado != JOptionPane.OK_OPTION) {
             return;
         }
-        String identificador = idInput.getText().trim().toUpperCase();
+        String identificador = campoIdentificador.getText().trim().toUpperCase();
         if (identificador.isEmpty()) {
-            JOptionPane.showMessageDialog(frame, "Ingresa un identificador para la maquinaria.",
-                    "Dato requerido", JOptionPane.WARNING_MESSAGE);
+            JOptionPane.showMessageDialog(ventanaPrincipal, "Escribe un código para identificar el equipo.",
+                    "Falta el código", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        for (EquipoAgricola equipo : maquinaria) {
+        for (EquipoAgricola equipo : equiposAgricolas) {
             if (equipo.identificador.equalsIgnoreCase(identificador)) {
-                JOptionPane.showMessageDialog(frame, "Ya existe una maquinaria con ese identificador.",
-                        "Identificador duplicado", JOptionPane.WARNING_MESSAGE);
+                JOptionPane.showMessageDialog(ventanaPrincipal, "Ese código ya está en uso. Elige otro, por favor.",
+                        "Código repetido", JOptionPane.WARNING_MESSAGE);
                 return;
             }
         }
 
-        EquipoAgricola nuevoEquipo = new EquipoAgricola(identificador, (String) tipoInput.getSelectedItem(),
-                (Integer) horasInput.getValue(), (Integer) umbralInput.getSelectedItem());
-        maquinaria.add(nuevoEquipo);
-        inventarioMaquinariaActiva.add(identificador + " (Activo)");
-        if ("Alta".equals(prioridadInput.getSelectedItem())) {
+        EquipoAgricola nuevoEquipo = new EquipoAgricola(identificador, (String) selectorTipoEquipo.getSelectedItem(),
+                (Integer) controlHorasTrabajo.getValue(), (Integer) selectorUmbralMantenimiento.getSelectedItem());
+        equiposAgricolas.add(nuevoEquipo);
+        if ("Alta".equals(selectorPrioridadInicial.getSelectedItem())) {
             colaPrioridadAlta.add(nuevoEquipo);
         } else {
             colaPrioridadBaja.add(nuevoEquipo);
         }
-        registrarEnHistorial("Maquinaria " + identificador + " agregada con prioridad "
-                + prioridadInput.getSelectedItem().toString().toLowerCase() + ".");
+        agregarAlHistorial("Agregamos el equipo " + identificador + " con prioridad "
+                + selectorPrioridadInicial.getSelectedItem().toString().toLowerCase() + ".");
         actualizarTablas();
-        estadoLabel.setText("Maquinaria " + identificador + " agregada");
+        estadoLabel.setText("Equipo " + identificador + " agregado.");
     }
 
     private void actualizarTablas() {
-        maquinariaModel.setRowCount(0);
-        estadisticasModel.setRowCount(0);
-        for (int i = 0; i < maquinaria.size(); i++) {
-            EquipoAgricola equipo = maquinaria.get(i);
+        modeloMaquinaria.setRowCount(0);
+        modeloEstadisticas.setRowCount(0);
+        for (int i = 0; i < equiposAgricolas.size(); i++) {
+            EquipoAgricola equipo = equiposAgricolas.get(i);
             boolean requiereMantenimiento = equipo.horasTotalesTrabajadas >= equipo.umbralMantenimiento;
             String prioridad = equipo.horasRestantes == 0 ? "Finalizada"
                     : (colaPrioridadAlta.contains(equipo) ? "Alta" : "Baja");
-            maquinariaModel.addRow(new Object[]{
+            modeloMaquinaria.addRow(new Object[]{
                 equipo.identificador, equipo.tipo, prioridad, equipo.horasRestantes, equipo.horasTotalesTrabajadas,
                 requiereMantenimiento ? "Requerido" : "Al día"
             });
-            if (i < estadisticasRendimiento.length) {
-                registrarEstadistica(i, 0, equipo.horasTotalesTrabajadas, 0);
-            }
-            estadisticasModel.addRow(new Object[]{
+            modeloEstadisticas.addRow(new Object[]{
                 equipo.identificador, "—", equipo.horasTotalesTrabajadas, "—"
             });
         }
     }
 
-    private void registrarEnHistorial(String mensaje) {
+    private void agregarAlHistorial(String mensaje) {
         historialArea.append(mensaje + System.lineSeparator());
         historialArea.setCaretPosition(historialArea.getDocument().getLength());
     }
